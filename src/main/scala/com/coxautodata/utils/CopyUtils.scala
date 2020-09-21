@@ -128,7 +128,7 @@ object CopyUtils extends Logging {
   private[utils] def copyFile(sourceFS: FileSystem, destFS: FileSystem, definition: SingleCopyDefinition, options: SparkDistCPOptions, taskAttemptID: Long): FileCopyResult = {
     val destPath = new Path(definition.destination)
 
-    Try(getFileStatusWithRetry(destPath,destFS)) match {
+     getFileStatusWithRetry(destPath,destFS) match {
       case Failure(_: FileNotFoundException) if options.dryRun =>
         FileCopyResult(definition.source.getPath.toUri, definition.destination, definition.source.len, CopyActionResult.SkippedDryRun)
       case Failure(_: FileNotFoundException) =>
@@ -222,10 +222,11 @@ object CopyUtils extends Logging {
       }
     }.map {
       _ =>
-        //val tempFile = destFS.getFileStatus(tempPath)
-        val tempFile = getFileStatusWithRetry(destPath,destFS)
-          if (sourceFile.getLen != tempFile.getLen)
-          throw new RuntimeException(s"Written file [${tempFile.getPath}] length [${tempFile.getLen}] did not match source file [${sourceFile.getPath}] length [${sourceFile.getLen}]")
+        getFileStatusWithRetry(destPath, destFS) match {
+          case Failure(exception) => scala.util.Failure(exception)
+          case Success(tempFile) => if (sourceFile.getLen != tempFile.getLen)
+            throw new RuntimeException(s"Written file [${tempFile.getPath}] length [${tempFile.getLen}] did not match source file [${sourceFile.getPath}] length [${sourceFile.getLen}]")
+        }
 
         if (removeExisting) {
           val res = destFS.delete(destPath, false)
@@ -248,9 +249,10 @@ object CopyUtils extends Logging {
 
   }
 
-  def getFileStatusWithRetry(destPath:Path,destFS:FileSystem) : FileStatus = {
-    val future: Future[FileStatus] = Future {
-      destFS.getFileStatus(destPath)
+
+  def getFileStatusWithRetry(destPath:Path, destFS:FileSystem) : Try[FileStatus] = {
+    val future: Future[Try[FileStatus]] = Future {
+      Try(destFS.getFileStatus(destPath))
     }
 
     val policy = retry.When {
@@ -259,7 +261,8 @@ object CopyUtils extends Logging {
         retry.Backoff(20,500.millisecond)
     }
 
-    val futureWithRetry = policy(future)(retry.Success[FileStatus],executionContext)
+    val success = retry.Success[Try[FileStatus]](t => t.isSuccess)
+    val futureWithRetry = policy(future)(success,executionContext)
     Await.result(futureWithRetry,60.seconds)
   }
 
