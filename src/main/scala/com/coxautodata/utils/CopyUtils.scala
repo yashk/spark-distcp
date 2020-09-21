@@ -236,7 +236,7 @@ object CopyUtils extends Logging {
         //val res = destFS.rename(tempPath, destPath)
         renameWithRetry(tempPath,destPath,destFS) match {
           case Failure(_) => throw new RuntimeException(s"Failed to rename temporary file [$tempPath] to [$destPath]")
-          case Success(_) => Success()
+          case Success(_) => Success(true)
         }
     } match {
       case Success(_) if removeExisting =>
