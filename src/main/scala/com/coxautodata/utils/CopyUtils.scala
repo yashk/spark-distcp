@@ -9,9 +9,15 @@ import org.apache.hadoop.fs._
 import org.apache.hadoop.io.IOUtils
 import org.apache.log4j.Level
 
+import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
+import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
+
 object CopyUtils extends Logging {
+
+  implicit val executionContext = scala.concurrent.ExecutionContext.Implicits.global
 
   /**
     * Handle the copy of a file/folder
@@ -121,7 +127,8 @@ object CopyUtils extends Logging {
     */
   private[utils] def copyFile(sourceFS: FileSystem, destFS: FileSystem, definition: SingleCopyDefinition, options: SparkDistCPOptions, taskAttemptID: Long): FileCopyResult = {
     val destPath = new Path(definition.destination)
-    Try(destFS.getFileStatus(destPath)) match {
+
+    Try(getFileStatusWithRetry(destPath,destFS)) match {
       case Failure(_: FileNotFoundException) if options.dryRun =>
         FileCopyResult(definition.source.getPath.toUri, definition.destination, definition.source.len, CopyActionResult.SkippedDryRun)
       case Failure(_: FileNotFoundException) =>
@@ -215,8 +222,9 @@ object CopyUtils extends Logging {
       }
     }.map {
       _ =>
-        val tempFile = destFS.getFileStatus(tempPath)
-        if (sourceFile.getLen != tempFile.getLen)
+        //val tempFile = destFS.getFileStatus(tempPath)
+        val tempFile = getFileStatusWithRetry(destPath,destFS)
+          if (sourceFile.getLen != tempFile.getLen)
           throw new RuntimeException(s"Written file [${tempFile.getPath}] length [${tempFile.getLen}] did not match source file [${sourceFile.getPath}] length [${sourceFile.getLen}]")
 
         if (removeExisting) {
@@ -238,6 +246,21 @@ object CopyUtils extends Logging {
         throw e
     }
 
+  }
+
+  def getFileStatusWithRetry(destPath:Path,destFS:FileSystem) : FileStatus = {
+    val future: Future[FileStatus] = Future {
+      destFS.getFileStatus(destPath)
+    }
+
+    val policy = retry.When {
+      case NonFatal =>
+        logWarning(s"Retrying filestatus request for path[${destPath}]")
+        retry.Backoff(20,500.millisecond)
+    }
+
+    val futureWithRetry = policy(future)(retry.Success[FileStatus],executionContext)
+    Await.result(futureWithRetry,60.seconds)
   }
 
 }

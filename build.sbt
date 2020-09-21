@@ -36,6 +36,7 @@ lazy val sparkdistcp = (project in file("."))
     libraryDependencies += "org.apache.spark" %% "spark-core" % sparkVersion % Provided,
     libraryDependencies += "org.apache.spark" %% "spark-sql" % sparkVersion % Provided,
     libraryDependencies += "com.github.scopt" %% "scopt" % scoptVersion % Compile,
+    libraryDependencies += "com.softwaremill.retry" %% "retry" % "0.3.3"  % Compile,
     licenses := Seq(
       "APL2" -> url("http://www.apache.org/licenses/LICENSE-2.0.txt")
     ),
