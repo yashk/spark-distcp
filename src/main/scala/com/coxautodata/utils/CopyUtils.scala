@@ -233,8 +233,10 @@ object CopyUtils extends Logging {
           if (!res) throw new RuntimeException(s"Failed to clean up existing file [$destPath]")
         }
         if (destFS.exists(destPath)) throw new RuntimeException(s"Cannot create file [$destPath] as it already exists")
-        val res = destFS.rename(tempPath, destPath)
-        if (!res) throw new RuntimeException(s"Failed to rename temporary file [$tempPath] to [$destPath]")
+        //val res = destFS.rename(tempPath, destPath)
+        renameWithRetry(tempPath,destPath,destFS) match {
+          case Failure(_) => throw new RuntimeException(s"Failed to rename temporary file [$tempPath] to [$destPath]")
+        }
     } match {
       case Success(_) if removeExisting =>
         FileCopyResult(sourceFile.getPath.toUri, dest, sourceFile.len, CopyActionResult.OverwrittenOrUpdated)
@@ -262,6 +264,22 @@ object CopyUtils extends Logging {
     }
 
     val success = retry.Success[Try[FileStatus]](t => t.isSuccess)
+    val futureWithRetry = policy(future)(success,executionContext)
+    Await.result(futureWithRetry,60.seconds)
+  }
+
+  def renameWithRetry(tempPath:Path, destPath:Path, destFS:FileSystem) : Try[Boolean] = {
+    val future: Future[Try[Boolean]] = Future {
+      Try(destFS.rename(tempPath, destPath))
+    }
+
+    val policy = retry.When {
+      case NonFatal =>
+        logWarning(s"Retrying rename request for tempPath[${tempPath}] to destPath[${destPath}]")
+        retry.Backoff(20,500.millisecond)
+    }
+
+    val success = retry.Success[Try[Boolean]](t => t.isSuccess && t.get)
     val futureWithRetry = policy(future)(success,executionContext)
     Await.result(futureWithRetry,60.seconds)
   }
