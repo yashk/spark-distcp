@@ -20,16 +20,9 @@ object CopyUtils extends Logging {
 
   implicit val executionContext = scala.concurrent.ExecutionContext.Implicits.global
 
-  val backoff = retry.When {
-    case NonFatal =>
-      retry.Backoff(6,1.second)
-  }
+  val backoff = retry.Backoff(6,1.second)
 
-
-  val pause = retry.When {
-    case NonFatal =>
-      retry.Pause(4,100.milliseconds)
-  }
+  val pause =  retry.Pause(4,100.milliseconds)
 
   val fileStatusSuccess = retry.Success[Try[FileStatus]](t => t.isSuccess)
 
@@ -278,7 +271,7 @@ object CopyUtils extends Logging {
       Try(
         {
           retryCount.incrementAndGet()
-          logInfo(s"trying filestatus request for path=[${destPath}] tryCount=${retryCount}")
+          logInfo(s"trying filestatus request for path=[${destPath}] tryCount=${retryCount.get()}")
           destFS.getFileStatus(destPath)
         }
       )
@@ -293,16 +286,14 @@ object CopyUtils extends Logging {
     val future: Future[Try[Boolean]] = Future {
       Try({
         retryCount.incrementAndGet()
+        logInfo(s"trying rename tempPath=[${tempPath}] to destPath=[${destPath}] tryCount=${retryCount.get()}")
         destFS.rename(tempPath, destPath)
       })
     }
-    val policy = retry.When {
-      case NonFatal =>
-        retry.Backoff(6,1.second)
-    }
+
 
     val success = retry.Success[Try[Boolean]](t => t.isSuccess && t.get)
-    val futureWithRetry = policy(future)(success,executionContext)
+    val futureWithRetry = backoff(future)(success,executionContext)
     Await.result(futureWithRetry,5.minutes)
   }
 }
