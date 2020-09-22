@@ -19,6 +19,21 @@ import scala.util.{Failure, Success, Try}
 object CopyUtils extends Logging {
 
   implicit val executionContext = scala.concurrent.ExecutionContext.Implicits.global
+
+  val backoff = retry.When {
+    case NonFatal =>
+      retry.Backoff(6,1.second)
+  }
+
+
+  val pause = retry.When {
+    case NonFatal =>
+      retry.Pause(4,100.milliseconds)
+  }
+
+  val fileStatusSuccess = retry.Success[Try[FileStatus]](t => t.isSuccess)
+
+
   val findBuild:String = "6422aac2-7961-4ade-94a5-9aec8f0a44f3"
 
   /**
@@ -130,7 +145,7 @@ object CopyUtils extends Logging {
   private[utils] def copyFile(sourceFS: FileSystem, destFS: FileSystem, definition: SingleCopyDefinition, options: SparkDistCPOptions, taskAttemptID: Long): FileCopyResult = {
     val destPath = new Path(definition.destination)
 
-     getFileStatusWithRetry(destPath,destFS) match {
+     getFileStatusWithRetry(destPath,destFS,backoff,fileStatusSuccess) match {
       case Failure(_: FileNotFoundException) if options.dryRun =>
         FileCopyResult(definition.source.getPath.toUri, definition.destination, definition.source.len, CopyActionResult.SkippedDryRun)
       case Failure(_: FileNotFoundException) =>
@@ -224,7 +239,7 @@ object CopyUtils extends Logging {
       }
     }.map {
       _ =>
-        getFileStatusWithRetry(destPath, destFS) match {
+        getFileStatusWithRetry(destPath, destFS,backoff,fileStatusSuccess) match {
           case Failure(exception) => scala.util.Failure(exception)
           case Success(tempFile) => if (sourceFile.getLen != tempFile.getLen)
             throw new RuntimeException(s"Written file [${tempFile.getPath}] length [${tempFile.getLen}] did not match source file [${sourceFile.getPath}] length [${sourceFile.getLen}]")
@@ -257,7 +272,7 @@ object CopyUtils extends Logging {
   }
 
 
-  def getFileStatusWithRetry(destPath:Path, destFS:FileSystem) : Try[FileStatus] = {
+  def getFileStatusWithRetry(destPath:Path, destFS:FileSystem, policy:retry.Policy,success:retry.Success[Try[FileStatus]]) : Try[FileStatus] = {
     val retryCount:AtomicInteger = new AtomicInteger(0)
     val future: Future[Try[FileStatus]] = Future {
       Try(
@@ -269,15 +284,9 @@ object CopyUtils extends Logging {
       )
     }
 
-    val policy = retry.When {
-      case NonFatal =>
-        retry.Backoff(6,1.second)
-    }
-
-    val success = retry.Success[Try[FileStatus]](t => t.isSuccess)
     val futureWithRetry = policy(future)(success,executionContext)
     Await.result(futureWithRetry,5.minutes)
-  }
+    }
 
   def renameWithRetry(tempPath:Path, destPath:Path, destFS:FileSystem) : Try[Boolean] = {
     val retryCount:AtomicInteger = new AtomicInteger(0)
@@ -285,11 +294,10 @@ object CopyUtils extends Logging {
       Try({
         retryCount.incrementAndGet()
         logInfo(s"trying rename request from tempPath[${tempPath}] to destPath[${destPath}] tryCount=${retryCount}")
-        if(destFS.exists(tempPath) && !destFS.exists(destPath)){
-          destFS.rename(tempPath, destPath)
-        }else{
-          destFS.exists(destPath)
-        }
+        val renameResult = destFS.rename(tempPath, destPath)
+        val destPathStatus = getFileStatusWithRetry(destPath,destFS,backoff,fileStatusSuccess)
+        val temPathStatus = getFileStatusWithRetry(tempPath,destFS,pause,fileStatusSuccess)
+        renameResult && destPathStatus.isSuccess && temPathStatus.isFailure
       })
     }
 
