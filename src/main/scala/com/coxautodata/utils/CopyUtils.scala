@@ -233,7 +233,6 @@ object CopyUtils extends Logging {
           if (!res) throw new RuntimeException(s"Failed to clean up existing file [$destPath]")
         }
         if (destFS.exists(destPath)) throw new RuntimeException(s"Cannot create file [$destPath] as it already exists")
-        //val res = destFS.rename(tempPath, destPath)
         renameWithRetry(tempPath,destPath,destFS) match {
           case Failure(_) => throw new RuntimeException(s"Failed to rename temporary file [$tempPath] to [$destPath]")
           case Success(_) => Success(true)
@@ -255,12 +254,18 @@ object CopyUtils extends Logging {
 
   def getFileStatusWithRetry(destPath:Path, destFS:FileSystem) : Try[FileStatus] = {
     val future: Future[Try[FileStatus]] = Future {
-      Try(destFS.getFileStatus(destPath))
+      Try(
+        {
+          println(s"995AFD0E-5368-4842-BC33-0C3A8F6B7B9C Retrying filestatus request for path[${destPath}]")
+          logInfo(s"995AFD0E-5368-4842-BC33-0C3A8F6B7B9C Retrying filestatus request for path[${destPath}]")
+          destFS.getFileStatus(destPath)
+        }
+      )
     }
 
     val policy = retry.When {
       case NonFatal =>
-        logWarning(s"Retrying filestatus request for path[${destPath}]")
+        logInfo(s"995AFD0E-5368-4842-BC33-0C3A8F6B7B9C Retrying filestatus request for path[${destPath}]")
         retry.Backoff(20,500.millisecond)
     }
 
@@ -271,12 +276,16 @@ object CopyUtils extends Logging {
 
   def renameWithRetry(tempPath:Path, destPath:Path, destFS:FileSystem) : Try[Boolean] = {
     val future: Future[Try[Boolean]] = Future {
-      Try(destFS.rename(tempPath, destPath))
+      Try({
+        println(s"E9AE2652-5EDE-4B5C-8072-100F06C0DCCA Retrying rename request for tempPath[${tempPath}] to destPath[${destPath}]")
+        logInfo(s"E9AE2652-5EDE-4B5C-8072-100F06C0DCCA Retrying rename request for tempPath[${tempPath}] to destPath[${destPath}]")
+        destFS.rename(tempPath, destPath)
+      })
     }
 
     val policy = retry.When {
       case NonFatal =>
-        logWarning(s"Retrying rename request for tempPath[${tempPath}] to destPath[${destPath}]")
+        logInfo(s"E9AE2652-5EDE-4B5C-8072-100F06C0DCCA Retrying rename request for tempPath[${tempPath}] to destPath[${destPath}]")
         retry.Backoff(20,500.millisecond)
     }
 
