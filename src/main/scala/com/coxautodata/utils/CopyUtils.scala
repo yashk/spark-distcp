@@ -2,6 +2,7 @@ package com.coxautodata.utils
 
 import java.io.FileNotFoundException
 import java.net.URI
+import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
 import com.coxautodata.SparkDistCPOptions
 import com.coxautodata.objects._
@@ -18,6 +19,7 @@ import scala.util.{Failure, Success, Try}
 object CopyUtils extends Logging {
 
   implicit val executionContext = scala.concurrent.ExecutionContext.Implicits.global
+  val findBuild:String = "6422aac2-7961-4ade-94a5-9aec8f0a44f3"
 
   /**
     * Handle the copy of a file/folder
@@ -234,8 +236,10 @@ object CopyUtils extends Logging {
         }
         if (destFS.exists(destPath)) throw new RuntimeException(s"Cannot create file [$destPath] as it already exists")
         renameWithRetry(tempPath,destPath,destFS) match {
-          case Failure(_) => throw new RuntimeException(s"Failed to rename temporary file [$tempPath] to [$destPath]")
-          case Success(_) => Success(true)
+          case Failure(e) => logError(s"rename request from tempPath[${tempPath}] to destPath[${destPath}] status=failure",e)
+            throw new RuntimeException(s"Failed to rename temporary file [$tempPath] to [$destPath]")
+          case Success(_) => logInfo(s"rename request from tempPath[${tempPath}] to destPath[${destPath}] status=success")
+            Success(true)
         }
     } match {
       case Success(_) if removeExisting =>
@@ -246,6 +250,7 @@ object CopyUtils extends Logging {
         logError(s"Failed to copy file [${sourceFile.getPath}] to [$destPath]", e)
         FileCopyResult(sourceFile.getPath.toUri, dest, sourceFile.len, CopyActionResult.Failed(e))
       case Failure(e) =>
+        logError(s"Failed to copy file [${sourceFile.getPath}] to [$destPath]", e)
         throw e
     }
 
@@ -253,11 +258,12 @@ object CopyUtils extends Logging {
 
 
   def getFileStatusWithRetry(destPath:Path, destFS:FileSystem) : Try[FileStatus] = {
+    val retryCount:AtomicInteger = new AtomicInteger(0)
     val future: Future[Try[FileStatus]] = Future {
       Try(
         {
-          println(s"995AFD0E-5368-4842-BC33-0C3A8F6B7B9C Retrying filestatus request for path[${destPath}]")
-          logInfo(s"995AFD0E-5368-4842-BC33-0C3A8F6B7B9C Retrying filestatus request for path[${destPath}]")
+          retryCount.incrementAndGet()
+          logInfo(s"trying filestatus request for path=[${destPath}] tryCount=${retryCount}")
           destFS.getFileStatus(destPath)
         }
       )
@@ -265,33 +271,36 @@ object CopyUtils extends Logging {
 
     val policy = retry.When {
       case NonFatal =>
-        logInfo(s"995AFD0E-5368-4842-BC33-0C3A8F6B7B9C Retrying filestatus request for path[${destPath}]")
-        retry.Backoff(20,500.millisecond)
+        retry.Backoff(6,1.second)
     }
 
     val success = retry.Success[Try[FileStatus]](t => t.isSuccess)
     val futureWithRetry = policy(future)(success,executionContext)
-    Await.result(futureWithRetry,60.seconds)
+    Await.result(futureWithRetry,5.minutes)
   }
 
   def renameWithRetry(tempPath:Path, destPath:Path, destFS:FileSystem) : Try[Boolean] = {
+    val retryCount:AtomicInteger = new AtomicInteger(0)
     val future: Future[Try[Boolean]] = Future {
       Try({
-        println(s"E9AE2652-5EDE-4B5C-8072-100F06C0DCCA Retrying rename request for tempPath[${tempPath}] to destPath[${destPath}]")
-        logInfo(s"E9AE2652-5EDE-4B5C-8072-100F06C0DCCA Retrying rename request for tempPath[${tempPath}] to destPath[${destPath}]")
-        destFS.rename(tempPath, destPath)
+        retryCount.incrementAndGet()
+        logInfo(s"trying rename request from tempPath[${tempPath}] to destPath[${destPath}] tryCount=${retryCount}")
+        if(destFS.exists(tempPath) && !destFS.exists(destPath)){
+          destFS.rename(tempPath, destPath)
+        }else{
+          destFS.exists(destPath)
+        }
       })
     }
 
     val policy = retry.When {
       case NonFatal =>
-        logInfo(s"E9AE2652-5EDE-4B5C-8072-100F06C0DCCA Retrying rename request for tempPath[${tempPath}] to destPath[${destPath}]")
-        retry.Backoff(20,500.millisecond)
+        retry.Backoff(6,1.second)
     }
 
     val success = retry.Success[Try[Boolean]](t => t.isSuccess && t.get)
     val futureWithRetry = policy(future)(success,executionContext)
-    Await.result(futureWithRetry,60.seconds)
+    Await.result(futureWithRetry,5.minutes)
   }
 
 }
