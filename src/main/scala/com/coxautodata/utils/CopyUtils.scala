@@ -238,7 +238,10 @@ object CopyUtils extends Logging {
         }
         if (destFS.exists(destPath)) throw new RuntimeException(s"Cannot create file [$destPath] as it already exists")
         renameWithRetry(tempPath,destPath,destFS,renamePolicy) match {
-          case Failure(e) | Success(false) => logError(s"rename request from tempPath[${tempPath}] to destPath[${destPath}] status=failure",e)
+          case Failure(e) => logError(s"rename request from tempPath[${tempPath}] to destPath[${destPath}] status=failure",e)
+            throw new RuntimeException(s"Failed to rename temporary file [$tempPath] to [$destPath]")
+          case Success(false) =>
+            logError(s"rename request from tempPath[${tempPath}] to destPath[${destPath}] status=failure rename returned false")
             throw new RuntimeException(s"Failed to rename temporary file [$tempPath] to [$destPath]")
           case Success(true) => logInfo(s"rename request from tempPath[${tempPath}] to destPath[${destPath}] status=success")
             Success(true)
