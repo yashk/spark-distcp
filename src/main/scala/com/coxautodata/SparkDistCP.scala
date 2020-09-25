@@ -63,7 +63,7 @@ object SparkDistCP extends Logging {
     * @param destinationPath Destination path to copy to
     * @param options         Options to use in the application
     */
-  def run(sparkSession: SparkSession, sourcePaths: Seq[Path], destinationPath: Path, options: SparkDistCPOptions): Unit = {
+  def run(sparkSession: SparkSession, sourcePaths: Seq[Path], destinationPath: Path, options: SparkDistCPOptions): String = {
     import sparkSession.implicits._
 
     assert(sourcePaths.nonEmpty, "At least one source path must be given")
@@ -99,12 +99,14 @@ object SparkDistCP extends Logging {
 
     val allResults = copyResult union deleteResult
 
+
     options.log match {
       case None => allResults.foreach(_ => ())
       case Some(f) => allResults.repartition(1).map(_.getMessage).toDS().write.mode(SaveMode.Append).csv(f.toString)
     }
 
     logInfo("SparkDistCP Run Statistics\n" + accumulators.getOutputText)
+    accumulators.getOutputText
 
   }
 
