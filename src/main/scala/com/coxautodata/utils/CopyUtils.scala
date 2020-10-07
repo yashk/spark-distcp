@@ -207,9 +207,7 @@ object CopyUtils extends Logging {
 
     val destPath = new Path(dest)
 
-    //val tempPath = new Path(destPath.getParent, s".sparkdistcp.$taskAttemptID.${destPath.getName}")
-
-    val tempPath = new Path(destPath.getParent, s"${destPath.getName}")
+    val tempPath = new Path(destPath.getParent, s".sparkdistcp.$taskAttemptID.${destPath.getName}")
 
     Try {
       var in: Option[FSDataInputStream] = None
@@ -238,16 +236,16 @@ object CopyUtils extends Logging {
           val res = destFS.delete(destPath, false)
           if (!res) throw new RuntimeException(s"Failed to clean up existing file [$destPath]")
         }
-//        if (destFS.exists(destPath)) throw new RuntimeException(s"Cannot create file [$destPath] as it already exists")
-//        renameWithRetry(tempPath,destPath,destFS,renamePolicy) match {
-//          case Failure(e) => logError(s"rename request from tempPath[${tempPath}] to destPath[${destPath}] status=failure",e)
-//            throw new RuntimeException(s"Failed to rename temporary file [$tempPath] to [$destPath]")
-//          case Success(false) =>
-//            logError(s"rename request from tempPath[${tempPath}] to destPath[${destPath}] status=failure rename returned false")
-//            throw new RuntimeException(s"Failed to rename temporary file [$tempPath] to [$destPath]")
-//          case Success(true) => logInfo(s"rename request from tempPath[${tempPath}] to destPath[${destPath}] status=success")
-//            Success(true)
-//        }
+        if (destFS.exists(destPath)) throw new RuntimeException(s"Cannot create file [$destPath] as it already exists")
+        renameWithRetry(tempPath,destPath,destFS,renamePolicy) match {
+          case Failure(e) => logError(s"rename request from tempPath[${tempPath}] to destPath[${destPath}] status=failure",e)
+            throw new RuntimeException(s"Failed to rename temporary file [$tempPath] to [$destPath]")
+          case Success(false) =>
+            logError(s"rename request from tempPath[${tempPath}] to destPath[${destPath}] status=failure rename returned false")
+            throw new RuntimeException(s"Failed to rename temporary file [$tempPath] to [$destPath]")
+          case Success(true) => logInfo(s"rename request from tempPath[${tempPath}] to destPath[${destPath}] status=success")
+            Success(true)
+        }
     } match {
       case Success(_) if removeExisting =>
         FileCopyResult(sourceFile.getPath.toUri, dest, sourceFile.len, CopyActionResult.OverwrittenOrUpdated)
@@ -291,6 +289,6 @@ object CopyUtils extends Logging {
         destFS.rename(tempPath, destPath)
       })
     })
-    Await.result(futureWithRetry,5.minutes)
+    Await.result(futureWithRetry,Duration.Inf)
   }
 }
